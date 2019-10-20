@@ -173,11 +173,21 @@ def test_backcalc(df, targs, num_hist_bars, num_predict_bars):
 
     # test that calculations are working as expected
     print('checking that backcalculated values and actual values are the same...')
+    problem = False
     for i in tqdm(range(len(all_preds))):
         init_loc = i + num_hist_bars
-        if not np.allclose(all_preds[i], new_df.iloc[init_loc:init_loc + 5]):
+        true_values = new_df.iloc[init_loc:init_loc + 5]
+        if not np.allclose(all_preds[i], true_values):
             print('uhoh, backcalculation didn\'t match actual values')
+            problem = True
             break
+        elif all_preds[i].index != true_values.index:
+            print('uhoh, backcalc index didn\'t match actual index')
+            problem = True
+            break
+    
+    if not problem:
+        print('everything checks out')
 
 
 def backcalculate_predictions(df, predictions, num_hist_bars, num_predict_bars):
@@ -248,3 +258,12 @@ train_idx = int(train_frac * feats.shape[0])
 
 # starts one after hist bars, and goes to num_predict_bars before train_idx
 true_train_targs = new_df.iloc[num_hist_bars:train_idx + num_hist_bars]
+
+# quick and dirty plot comparison
+import cufflinks as cf
+import plotly.io as pio
+pio.renderers.default = "browser"
+
+full_df = true_train_targs.merge(first_bars_df, left_index=True, right_index=True, suffixes=('', '_pred'))
+
+full_df[['close', 'close_pred']].iplot()

@@ -45,6 +45,7 @@ def create_feats_targs_pct(df, num_hist_bars=25, num_predict_bars=5):
     targs = []
     # raw_feats = []
     # raw_targs = []
+    print('creating features and targets...')
     for i in tqdm(range(num_hist_bars, pct_df.shape[0] - num_predict_bars)):
         feats.append(pct_df.iloc[i - num_hist_bars:i].values.flatten())
         targs.append(pct_df.iloc[i:i + num_predict_bars].values.flatten())
@@ -86,14 +87,18 @@ def create_simple_model(feats, targs):
     model.add(BatchNormalization())
     model.add(Dense(targs[0].shape[0], activation='elu', kernel_initializer='glorot_normal'))
 
+    # set tensorboard and early stopping callbacks
     log_dir="logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     tb = TensorBoard(log_dir=log_dir)
 
     es = EarlyStopping(monitor='val_loss', patience=6, restore_best_weights=True)
+
+    callbacks = [es, tb]
+
     sgd = optimizers.SGD(lr=0.5, momentum=0.9, nesterov=True) # decay=1e-6,
     model.compile(loss='mean_absolute_error', optimizer='sgd', metrics=['mse'])
 
-    return model
+    return model, callbacks
 
 
 def ensure_low_high(df):
@@ -121,7 +126,8 @@ def back_calc_one_point_pct(first_point, pct_targs, timeunit='1h'):
     first_pr = ensure_low_high(first_pr)
     preds = [first_pr]
     # it's a pd.Series, so the datetime is in the name, not index
-    index = [first_pr.name]
+    # Need to add one timeunit since this will have the previous timestep as the name
+    index = [first_pr.name + pd.Timedelta(timeunit)]
 
     for i in range(1, pct_targs.shape[-1]):
         prd = preds[-1] * (1 + pct_targs[i])
@@ -166,9 +172,10 @@ def test_backcalc(df, targs, num_hist_bars, num_predict_bars):
                                         num_predict_bars=num_predict_bars)
 
     # test that calculations are working as expected
+    print('checking that backcalculated values and actual values are the same...')
     for i in tqdm(range(len(all_preds))):
         init_loc = i + num_hist_bars
-        if not np.allclose(all_preds[i], df_1h.iloc[init_loc:init_loc + 5]):
+        if not np.allclose(all_preds[i], new_df.iloc[init_loc:init_loc + 5]):
             print('uhoh, backcalculation didn\'t match actual values')
             break
 
@@ -182,7 +189,10 @@ def backcalculate_predictions(df, predictions, num_hist_bars, num_predict_bars):
     rs_preds = predictions.reshape(-1, num_predict_bars, 5)
 
     all_preds = []
+    print('backcalculating values...')
     for i in tqdm(range(rs_preds.shape[0])):
+        # get the point just before the predictions for
+        # calculating actual value from pct_chg
         point = df.iloc[i + num_hist_bars - 1]
         pr = back_calc_one_point_pct(point, rs_preds[i])
         all_preds.append(pr)
@@ -207,8 +217,9 @@ new_df, feats, targs = create_feats_targs_pct(df_1h,
 train_feats, train_targs, test_feats, test_targs = create_train_test(feats, targs, train_frac=train_frac)
 
 # make model, evaluate performance
-model = create_simple_model(feats, targs)
-history = model.fit(train_feats, train_targs, epochs=1000, validation_split=0.15, callbacks=[es, tb])
+model, callbacks = create_simple_model(feats, targs)
+# change epochs to 1k for production
+history = model.fit(train_feats, train_targs, epochs=5, validation_split=0.15, callbacks=callbacks)
 
 print(model.evaluate(train_feats, train_targs))
 print(model.evaluate(test_feats, test_targs))
@@ -223,7 +234,7 @@ With pct feats and targs, seems to do much better
 train_preds = model.predict(train_feats)
 
 # should print nothing if works properly, otherwise prints 'uh oh..'
-# test_backcalc(new_df, targs, num_hist_bars, num_predict_bars)
+test_backcalc(new_df, targs, num_hist_bars, num_predict_bars)
 
 true_preds = backcalculate_predictions(new_df, train_preds, num_hist_bars, num_predict_bars)
 
@@ -236,5 +247,4 @@ first_bars_df = pd.concat(first_bars, axis=1).T
 train_idx = int(train_frac * feats.shape[0])
 
 # starts one after hist bars, and goes to num_predict_bars before train_idx
-# need to remove second num_hist_bars when re-running
-true_train_targs = new_df.iloc[num_hist_bars + 1:train_idx - num_predict_bars]
+true_train_targs = new_df.iloc[num_hist_bars:train_idx + num_hist_bars]

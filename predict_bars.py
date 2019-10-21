@@ -96,7 +96,7 @@ def create_simple_model(feats, targs):
     callbacks = [es, tb]
 
     sgd = optimizers.SGD(lr=0.5, momentum=0.9, nesterov=True) # decay=1e-6,
-    model.compile(loss='mean_absolute_error', optimizer='sgd', metrics=['mse'])
+    model.compile(loss='mae', optimizer='sgd')#, metrics=['mse'])
 
     return model, callbacks
 
@@ -228,8 +228,8 @@ train_feats, train_targs, test_feats, test_targs = create_train_test(feats, targ
 
 # make model, evaluate performance
 model, callbacks = create_simple_model(feats, targs)
-# change epochs to 1k for production
-history = model.fit(train_feats, train_targs, epochs=5, validation_split=0.15, callbacks=callbacks)
+# change epochs to 1k for production, 5 for testing
+history = model.fit(train_feats, train_targs, epochs=1000, validation_split=0.15, callbacks=callbacks)
 
 print(model.evaluate(train_feats, train_targs))
 print(model.evaluate(test_feats, test_targs))
@@ -238,13 +238,17 @@ print(model.evaluate(test_feats, test_targs))
 Notes: noticed when using raw feats and targs, it seems to predict the average
 when using feats and raw targs, doesn't seem to do well
 With pct feats and targs, seems to do much better
+
+MSLE seems to be much worse than MAE, MSE gives NAN for loss
+
+MAE with around 60 epochs gives good results.  Sometimes seems to have outliers in the predictions though
 """
 
 
 train_preds = model.predict(train_feats)
 
 # should print nothing if works properly, otherwise prints 'uh oh..'
-test_backcalc(new_df, targs, num_hist_bars, num_predict_bars)
+# test_backcalc(new_df, targs, num_hist_bars, num_predict_bars)
 
 true_preds = backcalculate_predictions(new_df, train_preds, num_hist_bars, num_predict_bars)
 
